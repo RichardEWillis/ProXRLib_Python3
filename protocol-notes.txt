@@ -1,0 +1,199 @@
+protocol-notes.txt - ProXR
+
+ProXR Protocol (Relay Board)
+
+Control Array: Bank#, Relay#
+Bank# := {0 .. 255} | {0x00 .. 0xFF}
+			1 := Bank 1 (1st bank)
+			255 := Bank 255 (last bank)
+			0 := "ALL BANKS" (may be all relays or a specific relay #)
+				"Relay x" := in all banks, relay x will be affected
+				"all relays" := all relays in the chain will be affected
+
+Relay# := {0..7},{8..15},{16..23},{29},{30},{31},{32}
+			{0..7}  := turn off a relay, 0 := first, 7 := last in a bank of 8
+			{8..15} := turn on a relay, 8 := first, 15 := last in a bank of 8
+			{16..23}:= read relay, 16 := first, 23 := last in a bank of 8
+			{29}    := all relays OFF
+			{30}    := all relays ON
+			{31}    := invert all relays, on-->off, off-->on
+			{32}    := bit swap relay states, 1 <--> 7, 2 <--> 6, etc.
+
+Refresh Modes := {Auto, Manual}
+	Auto := relays are changed to reflect commanded updates at a regular 
+			polling rate so all relays on the same board are updated at once 
+			but multiple boards may not update simultaneously.
+  Manual := relay states are not changed until a manual refresh command is sent
+            and so simultaneous relay changes accross multiple boards can be
+			done in this manner.
+			
+Commands:
+
+Note [1] - (Some GET commands) On a read of all banks, there may only be the 
+           first 32 banks returned in the Ack.
+
+[1] Select Bank
+
+	0xFE 0x31 <b> --> (Ack) 0x55
+		<b> := {0x00 .. 0xFF}
+			0 := ALL BANKS
+			1 := First Bank of 8	R(1 .. 8)
+			2 := Second Bank of 8	R(9 .. 16)
+			...
+			FF := last bank         R(2041 .. 2048)
+
+[2] Read Current Bank
+
+	0xFE 0x22 --> (Ack) <b>
+		<b> := {0x00 .. 0xFF} Returns Bank#. Bank# 0 := ALL BANKS
+
+[3a] Change Relay (in currently selected bank)(Method 1)
+
+	0xFE <r> <n>  --> (Ack) 0x55
+	<r> := relay (see Relay# above)
+	<n> := affect n relays after the selected one {1 .. 7} depending on 1st relay. eg. 2 would mean "and the following 2 relays as well"
+	
+	Examples:
+	(A)	Turn on Relay 0 and all other 7 relays in the current bank
+		0xFE 0x08 0x07
+		
+	(B) Turn off Relay 4
+		0xFE 0x04
+		
+	(C) Turn on Relays 6,7
+		0xFE 0x14 0x01
+
+[3b] Change Relay (in currently selected bank)(Method 2)
+
+	0xFE 0x28 <rbf> --> (Ack) 0x55
+		<rbf> := {0x00 .. 0xFF} 8-bit bitfield representing all 8 relays in 
+                 currently selected bank b<0>:= 1st relay, '1' := ON
+
+[3c] Change Relay (any bank)(Method 3)
+	(Bank selection mode is abandoned in this newer protocol)
+	
+	Turn OFF
+	0xFE 0x2F <RL> <RH> --> (Ack) 0x55
+		Relay# := <RH><RL> (16-bit word). <RH> := 0, 1st 256 relays, <RH> := 1, relay 257 - 511, etc.
+	
+	Turn ON
+	0xFE 0x30 <RL> <RH> --> (Ack) 0x55
+		Relay# := <RH><RL> (16-bit word). <RH> := 0, 1st 256 relays, <RH> := 1, relay 257 - 511, etc.
+	
+[4] Read Relay (in currently selected bank)
+
+	0xFE <r>  --> (Ack) <a>
+	<r> := {16..23}  relay# = <r> - 16
+	       {24}      all relays in bank
+	<a> := {0,1}     0 := OFF, 1 := ON
+		   {0x00..0xFF} (for reading all relays) on/off status encoded in bitfield
+		   
+[5] Relay Refresh Mode - SET
+
+	0xFE {25,26} --> (Ack) 0x55	
+		25 := Auto Refresh
+		26 := Manual Refresh
+	
+[6] Relay Refresh Mode - GET
+
+	0xFE  {36} --> (Ack) {0,1}
+		{0} - Manual Refresh Mode
+		{1} - Auto Refresh Mode
+
+[7] Manual Refresh Relays (Manual Mode!) (ALL BANKS!)
+
+	0xFE {37} --> (Ack) 0x55
+	
+[8] Comms Test & Status
+
+	0xFE 0x21 --> (Ack) {85,86,87}
+		{85} := Controller in RUN mode
+		{86} := Controller in CONFIGURATION mode
+		{87} := Controller in LOCKDOWN mode
+
+[9] Power up state of all relays (non-volatile data) - SET
+
+	0xFE 0x2A <b> --> (Ack) 0x55
+		<b> := {0x00 .. 0xFF} Bank#, 0 := ALL BANKS
+	Note: The current state of all relays is captured in-situ. An explicit 
+		  relay state is not commanded out.
+
+[10] Power up state of all relays (non-volatile data) - GET
+
+	0xFE 0x2B <b> -> (Ack)<rbf>
+		<b>   := {0x00 .. 0xFF}  Bank#, 0 := ALL BANKS
+		<rbf> := {0x00 .. 0xFF}  Relay states in a bit-field. '1' := ON
+		
+"100 Series Commands - Embedded Bank#"
+A newer command protocol, does not need to set a bank# in a previous command.
+
+[11] Turn off a relay (a-priori bank select not required)
+
+	0xFE <R> <B> [<A>] --> (Ack) 0x55
+		<R>  := {0x64 .. 0x6B}  Relay# = <R> - 0x64, so 0x64 is relay0, 0x65 is relay1 etc.
+		<B>  := {0..0xFF}       Bank#, 0 := ALL BANKS
+	   [<A>] := {1..7}          and <A> additional relays beyond the initial (optional)
+	   
+[12] Turn on a relay (a-priori bank select not required)
+
+	0xFE <R> <B> [<A>] --> (Ack) 0x55
+		<R>  := {0x6C .. 0x73}  Relay# = <R> - 0x6C, so 0x6C is relay0, 0x6D is relay1 etc.
+		<B>  := {0..0xFF}       Bank#, 0 := ALL BANKS
+	   [<A>] := {1..7}          and <A> additional relays beyond the initial (optional)
+	   
+[13] Read status of one relay (a-priori bank select not required)
+
+	0xFE <R> <B> --> (Ack) {0,1}
+		<R>  := {0x74 .. 0x7B}  Relay# = <R> - 0x74, so 0x74 is relay0, 0x75 is relay1 etc.
+		<B>  := {1..0xFF}       Bank#, 0 := INVALID
+		(Ack):= {0,1}			'1' := ON
+		
+[14] Turn off all relays (a-priori bank select not required)
+
+	0xFE 0x81 <B> --> (Ack) 0x55
+		<B>  := {0..0xFF}       Bank#, 0 := ALL BANKS
+	
+[15] Turn on all relays (a-priori bank select not required)
+
+	0xFE 0x82 <B> --> (Ack) 0x55
+		<B>  := {0..0xFF}       Bank#, 0 := ALL BANKS
+
+[16] Invert all relays in a bank (a-priori bank select not required)
+
+	0xFE 0x83 <B> --> (Ack) 0x55
+		<B>  := {0..0xFF}       Bank#, 0 := ALL BANKS
+
+[17] Bit-swap all relays in a Bank (a-priori bank select not required)
+	 bit swap relay states, 1 <--> 7, 2 <--> 6, etc.
+
+	0xFE 0x84 <B> --> (Ack) 0x55
+		<B>  := {0..0xFF}       Bank#, 0 := ALL BANKS
+
+[18] Set Status of all relays in a bank using bit-field (a-priori bank select not required)
+	b<n>
+		'1' := relay ON
+		'0' := relay OFF
+	
+	b<0..7> --> <bf>
+	
+	0xFE 0x8C <bf> <B> --> (Ack) 0x55
+		<B>  := {0..0xFF}       Bank#, 0 := ALL BANKS
+
+[19] Store relay states as powerup default 
+		(current relay state at time of receiving command)
+		(a-priori bank select not required)
+
+	0xFE 0x8E <B> --> (Ack) 0x55
+		<B>  := {0..0xFF}       Bank#, 0 := ALL BANKS
+
+[20] Report Powerup relay set-state for a bank (a-priori bank select not required)
+
+	0xFE 0x8F <B> --> (Ack) <bf>
+		<B>  := {0..0xFF}       Bank#, 0 := ALL BANKS
+		<bf> := b[0..7]        b[0] := 1st relay, '1' := ON
+
+TIMER COMMANDS
+
+ [FUTURE]
+ 
+ 
