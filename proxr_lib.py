@@ -116,9 +116,9 @@ class ProXRLib(object):
             raise Exception('Invalid parity, must be one of: {E,O,N,M,S}')
             
         self.ser = serial.Serial(port=devname, baudrate=baud, bytesize=e_bitsz, 
-            parity=e_parity, stopbits=e_stops, timeout=self.timeout, 
+            parity=e_parity, stopbits=e_stops, timeout=self.tmout, 
             xonxoff=self.use_SW_XON_XOFF, rtscts=self.use_HW_RTSCTS,
-            dsrdtr=self.use_HW_DSRDTR, write_timeout=self.timeout,
+            dsrdtr=self.use_HW_DSRDTR, write_timeout=self.tmout,
             exclusive=True)
             
     def close(self):
@@ -150,7 +150,10 @@ class ProXRLib(object):
     def Cmd_CommsTest(self):
         if self.ser:
             if self._writer(bytearray(b'\x21')) == 1:
-                ack = self._reader(1)
+                # returns: single element of type 'byte'
+                #          convert to hex string then to base 10 int
+                ack = int( self._reader(1).hex(), 16 )
+
                 # match ack:
                     # case STATUS.RUN.value:
                         # return STATUS.RUN
@@ -171,6 +174,17 @@ class ProXRLib(object):
                     raise Exception('Unexpected return value from CommsTest')
                     
         return None
+
+    # Convert Comms Test state to a descriptive string.
+    def StatusDesc(self, st):
+        if st == STATUS.RUN:
+            return "Normal running Mode"
+        elif st == STATUS.CONFIG:
+            return "Configuration Mode"
+        elif st == STATUS.LOCKDN:
+            return "Lockdown Mode"
+        else:
+            return "Unknown state ???"
 
     # Set/Clear a Relay
     # Bank: 1 .. 255 (Default = 1) (NOTE: Currently only Bank:1 is available)
